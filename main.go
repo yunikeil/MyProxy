@@ -44,21 +44,16 @@ func handleHTTP(clientConn net.Conn, reader *bufio.Reader, method, url, requestL
 	// Remove protocol prefix
 	url = strings.TrimPrefix(url, "http://")
 
-	log.Printf("url: %s\n", url)
-
 	// Split the domain:port from the path
 	hostPort := url
 	if idx := strings.Index(url, "/"); idx != -1 {
 		hostPort = url[:idx]
 	}
-	log.Printf("hostPort: %s\n", hostPort)
 
 	// If no port is specified, default to port 80
 	if !strings.Contains(hostPort, ":") {
 		hostPort = net.JoinHostPort(hostPort, "80")
 	}
-
-	log.Printf("new hostPort: %s\n", hostPort)
 
 	// Connect to the remote server
 	serverConn, err := net.Dial("tcp", hostPort)
@@ -84,12 +79,14 @@ func handleHTTPS(clientConn net.Conn, reader *bufio.Reader, url string) {
 	// If no port is specified, default to port 443 for HTTPS
 	if !strings.Contains(hostPort, ":") {
 		hostPort = net.JoinHostPort(hostPort, "443")
+	} else if strings.Count(hostPort, ":") != 1 {
+		hostPort = "[" + hostPort + "]:443"
 	}
 
 	// Connect to the remote server
 	serverConn, err := net.Dial("tcp", hostPort)
 	if err != nil {
-		log.Printf("Unable to connect to remote server: %s\n", err)
+		log.Printf("Unable to connect to remote server (s): %s\n", err)
 		return
 	}
 	defer serverConn.Close()
