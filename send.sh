@@ -1,1 +1,0 @@
-curl -x http://localhost:8080 http://example.com

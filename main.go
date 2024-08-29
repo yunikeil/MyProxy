@@ -2,42 +2,94 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"log"
 	"net"
+	"strconv"
 	"strings"
 )
+
+const (
+	DEBUG = iota
+	INFO
+	WARN
+	ERROR
+)
+
+const logLevel = DEBUG
+
+func logMessage(level int, format string, v ...interface{}) {
+	if level >= logLevel {
+		log.Printf(format, v...)
+	}
+}
 
 func handleConnection(clientConn net.Conn) {
 	defer clientConn.Close()
 
-	// Read the first line from the client to determine the request type
 	reader := bufio.NewReader(clientConn)
+
 	requestLine, err := reader.ReadString('\n')
 	if err != nil {
-		log.Printf("Error reading request line: %s\n", err)
+		if err == io.EOF {
+			logMessage(INFO, "Connection closed by client before request line was read.\n")
+		} else {
+			logMessage(ERROR, "Failed to read request line: %v\n", err)
+			sendErrorResponse(clientConn, "Failed to read request line")
+		}
 		return
 	}
 
-	// Parse the request line
-	parts := strings.Fields(requestLine)
-	if len(parts) < 2 {
-		log.Printf("Invalid request line: %s\n", requestLine)
+	method, url, err := parseRequestLine(requestLine)
+	if err != nil {
+		logMessage(ERROR, "Invalid request line: %s - %v\n", requestLine, err)
+		sendErrorResponse(clientConn, "Invalid request line")
 		return
 	}
 
-	method := parts[0]
-	url := parts[1]
-
-	if method == "CONNECT" {
-		// Handle HTTPS connection
-		log.Printf("New https connection to %s\n", url)
+	if isLocalRequest(url) {
+		sendNotFoundResponse(clientConn)
+		logMessage(DEBUG, "Returned 404 for GET request to %s\n", url)
+	} else if method == "CONNECT" {
+		logMessage(DEBUG, "New HTTPS connection to %s\n", url)
 		handleHTTPS(clientConn, reader, url)
 	} else {
-		// Handle HTTP connection
-		log.Printf("New http connection to %s\n", url)
+		logMessage(DEBUG, "New HTTP connection to %s\n", url)
 		handleHTTP(clientConn, reader, method, url, requestLine)
 	}
+}
+
+func isLocalRequest(url string) bool {
+	return strings.HasPrefix(url, "/")
+}
+
+func parseRequestLine(requestLine string) (method string, url string, err error) {
+	parts := strings.Fields(requestLine)
+	if len(parts) < 2 {
+		return "", "", fmt.Errorf("request line has fewer than 2 parts")
+	}
+	return parts[0], parts[1], nil
+}
+
+func sendNotFoundResponse(conn net.Conn) {
+	response := "HTTP/1.1 404 Not Found\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"Content-Length: 23\r\n" +
+		"\r\n" +
+		"This is a proxy server."
+
+	conn.Write([]byte(response))
+}
+
+func sendErrorResponse(conn net.Conn, message string) {
+	response := "HTTP/1.1 400 Bad Request\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"Content-Length: " + strconv.Itoa(len(message)) + "\r\n" +
+		"\r\n" +
+		message
+
+	conn.Write([]byte(response))
 }
 
 func handleHTTP(clientConn net.Conn, reader *bufio.Reader, method, url, requestLine string) {
@@ -58,7 +110,7 @@ func handleHTTP(clientConn net.Conn, reader *bufio.Reader, method, url, requestL
 	// Connect to the remote server
 	serverConn, err := net.Dial("tcp", hostPort)
 	if err != nil {
-		log.Printf("Unable to connect to remote server: %s\n", err)
+		logMessage(ERROR, "Unable to connect to remote server: %s\n", err)
 		return
 	}
 	defer serverConn.Close()
@@ -86,7 +138,7 @@ func handleHTTPS(clientConn net.Conn, reader *bufio.Reader, url string) {
 	// Connect to the remote server
 	serverConn, err := net.Dial("tcp", hostPort)
 	if err != nil {
-		log.Printf("Unable to connect to remote server (s): %s\n", err)
+		logMessage(ERROR, "Unable to connect to remote server (s): %s\n", err)
 		return
 	}
 	defer serverConn.Close()
@@ -101,21 +153,21 @@ func handleHTTPS(clientConn net.Conn, reader *bufio.Reader, url string) {
 
 func main() {
 	// Listen on a local port
-	listenAddr := "127.0.0.1:8080"
+	listenAddr := "0.0.0.0:8080"
 
 	listener, err := net.Listen("tcp", listenAddr)
 	if err != nil {
-		log.Fatalf("Unable to listen on %s: %s\n", listenAddr, err)
+		logMessage(ERROR, "Unable to listen on %s: %s\n", listenAddr, err)
 	}
 	defer listener.Close()
 
-	log.Printf("TCP proxy listening on %s\n", listenAddr)
+	logMessage(INFO, "TCP proxy listening on %s\n", listenAddr)
 
 	// Accept incoming connections
 	for {
 		clientConn, err := listener.Accept()
 		if err != nil {
-			log.Printf("Unable to accept connection: %s\n", err)
+			logMessage(ERROR, "Unable to accept connection: %s\n", err)
 			continue
 		}
 
