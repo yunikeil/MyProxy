@@ -17,7 +17,7 @@ const (
 	ERROR
 )
 
-const logLevel = DEBUG
+const logLevel = INFO
 
 func logMessage(level int, format string, v ...interface{}) {
 	if level >= logLevel {
@@ -82,6 +82,16 @@ func sendNotFoundResponse(conn net.Conn) {
 	conn.Write([]byte(response))
 }
 
+func sendBadGatewayResponse(conn net.Conn) {
+	response := "HTTP/1.1 502 Bad Gateway\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"Content-Length: 23\r\n" +
+		"\r\n" +
+		"Connection to remote failed"
+
+	conn.Write([]byte(response))
+}
+
 func sendErrorResponse(conn net.Conn, message string) {
 	response := "HTTP/1.1 400 Bad Request\r\n" +
 		"Content-Type: text/plain\r\n" +
@@ -138,7 +148,12 @@ func handleHTTPS(clientConn net.Conn, reader *bufio.Reader, url string) {
 	// Connect to the remote server
 	serverConn, err := net.Dial("tcp", hostPort)
 	if err != nil {
-		logMessage(ERROR, "Unable to connect to remote server (s): %s\n", err)
+		if _, ok := err.(*net.OpError); ok {
+			sendBadGatewayResponse(clientConn)
+			logMessage(INFO, "Connection refused with: %s", hostPort)
+		} else {
+			logMessage(ERROR, "Unable to connect to remote server (s): %s\n", err)
+		}
 		return
 	}
 	defer serverConn.Close()
